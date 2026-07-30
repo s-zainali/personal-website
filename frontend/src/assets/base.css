@@ -1,1 +1,77 @@
+@import "tailwindcss";
 
+@theme {
+    --color-ink-black-50: #edf2f7;
+    --color-ink-black-100: #dce6ef;
+    --color-ink-black-200: #b8cce0;
+    --color-ink-black-300: #95b2d0;
+    --color-ink-black-400: #7199c1;
+    --color-ink-black-500: #4e7fb1;
+    --color-ink-black-600: #3e668e;
+    --color-ink-black-700: #2f4c6a;
+    --color-ink-black-800: #1f3347;
+    --color-ink-black-900: #101923;
+    --color-ink-black-950: #0b1219;
+
+    --color-jet-black-50: #eef2f6;
+    --color-jet-black-100: #dde6ee;
+    --color-jet-black-200: #bbccdd;
+    --color-jet-black-300: #99b2cc;
+    --color-jet-black-400: #7799bb;
+    --color-jet-black-500: #557faa;
+    --color-jet-black-600: #446688;
+    --color-jet-black-700: #334c66;
+    --color-jet-black-800: #223344;
+    --color-jet-black-900: #111922;
+    --color-jet-black-950: #0c1218;
+
+    --color-charcoal-blue-50: #eff2f5;
+    --color-charcoal-blue-100: #dfe5ec;
+    --color-charcoal-blue-200: #c0ccd8;
+    --color-charcoal-blue-300: #a0b2c5;
+    --color-charcoal-blue-400: #8198b1;
+    --color-charcoal-blue-500: #617e9e;
+    --color-charcoal-blue-600: #4e657e;
+    --color-charcoal-blue-700: #3a4c5f;
+    --color-charcoal-blue-800: #27333f;
+    --color-charcoal-blue-900: #131920;
+    --color-charcoal-blue-950: #0e1216;
+
+    --color-stormy-teal-50: #e7fcfd;
+    --color-stormy-teal-100: #d0f8fb;
+    --color-stormy-teal-200: #a1f2f7;
+    --color-stormy-teal-300: #71ebf4;
+    --color-stormy-teal-400: #42e4f0;
+    --color-stormy-teal-500: #13ddec;
+    --color-stormy-teal-600: #0fb1bd;
+    --color-stormy-teal-700: #0b858e;
+    --color-stormy-teal-800: #08595e;
+    --color-stormy-teal-900: #042c2f;
+    --color-stormy-teal-950: #031f21;
+
+    --color-dark-cyan-50: #e5ffff;
+    --color-dark-cyan-100: #ccfffe;
+    --color-dark-cyan-200: #99fffd;
+    --color-dark-cyan-300: #66fffc;
+    --color-dark-cyan-400: #33fffc;
+    --color-dark-cyan-500: #00fffb;
+    --color-dark-cyan-600: #00ccc9;
+    --color-dark-cyan-700: #009996;
+    --color-dark-cyan-800: #006664;
+    --color-dark-cyan-900: #003332;
+    --color-dark-cyan-950: #002423;
+
+    --color-neon-ice-50: #e5ffff;
+    --color-neon-ice-100: #ccffff;
+    --color-neon-ice-200: #99ffff;
+    --color-neon-ice-300: #66ffff;
+    --color-neon-ice-400: #33ffff;
+    --color-neon-ice-500: #00ffff;
+    --color-neon-ice-600: #00cccc;
+    --color-neon-ice-700: #009999;
+    --color-neon-ice-800: #006666;
+    --color-neon-ice-900: #003333;
+    --color-neon-ice-950: #002424;
+
+
+}
