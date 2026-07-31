@@ -1,23 +1,23 @@
 <script setup>
 const roles = [
     {
-        title: 'Senior Software Engineer',
-        org: 'Meridian Systems',
-        period: '2023 — Present',
+        title: 'Software Engineer Intern',
+        org: 'Bank Al Habib, Pakistan',
+        period: '2026',
         description:
             'Leading backend architecture for a fleet-management platform; migrated core services to an event-driven design, cutting p95 latency by 40%.',
     },
     {
-        title: 'Software Engineer',
-        org: 'Northwind Labs',
-        period: '2021 — 2023',
+        title: 'Lead Software Engineer',
+        org: 'Cents',
+        period: '2025 - 2026',
         description:
             'Built internal tooling for data pipelines and owned the migration of the deploy process to a fully containerized, zero-downtime pipeline.',
     },
     {
-        title: 'UAV Systems Intern',
-        org: 'Skyline Robotics',
-        period: '2020 — 2021',
+        title: 'Undergraduate Teaching Assistant',
+        org: 'University of British Columbia',
+        period: '2025',
         description: 'Developed flight-control firmware and telemetry tooling for a fixed-wing autonomous survey drone.',
     },
 ]

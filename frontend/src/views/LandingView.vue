@@ -6,9 +6,11 @@ import ExperienceSection from '@/components/sections/ExperienceSection.vue'
 import ProjectsSection from '@/components/sections/ProjectsSection.vue'
 import ContactSection from '@/components/sections/ContactSection.vue'
 import PoweredByZain from '@/Components/PoweredByZain.vue'
+import FlyingPlane from '@/components/FlyingPlane.vue'
 </script>
 
 <template>
+    <FlyingPlane model-url="/soar.glb" />
     <div class="relative min-h-[100dvh] w-full overflow-hidden bg-ink-950 font-sans text-ink-50">
         <!-- film grain -->
         <div class="grain pointer-events-none absolute inset-0 z-0 opacity-[0.04] mix-blend-overlay"></div>
@@ -27,7 +29,7 @@ import PoweredByZain from '@/Components/PoweredByZain.vue'
             <Header />
 
             <main
-                class="mx-auto flex w-full min-h-[100dvh] max-w-7xl flex-1 flex-col-reverse items-center justify-center gap-16 px-6 py-16 sm:px-10 lg:flex-row lg:gap-16 lg:px-16"
+                class="mx-auto flex w-full min-h-[80dvh] max-w-7xl flex-1 flex-col-reverse items-center justify-center gap-16 px-6 py-16 sm:px-10 lg:flex-row lg:gap-16 lg:px-16"
             >
                 <!-- text column -->
                 <div class="relative flex flex-1 max-w-xl flex-col items-center gap-7 text-center opacity-0 animate-fade-up lg:items-start lg:text-left">
