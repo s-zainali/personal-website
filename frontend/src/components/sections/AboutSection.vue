@@ -1,21 +1,6 @@
 <script setup>
-const skills = {
-    'Python': '/Python.png',
-    'Flask': '/flask.png',
-    'FastAPI': '/fastapi.png',
-    'JavaScript': '/javascript.webp',
-    'Next.js': '/nextjs.png',
-    'React.js': '/react.webp',
-    'Vue.js': '/vue.webp',
-    'C++': '/cpp.webp',
-    'PCB Design': '/pcb.png',
-    'Docker': '/docker.png',
-    'PostgreSQL': '/postgres.png',
-    'AWS': '/aws.webp',
-    'Onshape': '/onshape.png',
-    'SolidWorks': '/solidworks.png',
-    'Git': '/git.png',
-}
+import { RouterLink } from 'vue-router'
+import { about, skills } from '@/data/portfolio'
 </script>
 
 <template>
@@ -28,23 +13,21 @@ const skills = {
 
             <h2 class="font-display text-3xl font-medium text-ink-50 sm:text-4xl">A bit about me</h2>
 
-            <p class="max-w-2xl text-base leading-relaxed text-ink-300 sm:text-lg">
-                I'm a software engineer who spends the workday writing systems that need to be reliable, and the
-                weekend building things that need to fly. I care about clean architecture as much as clean solder
-                joints — whether that means designing a scalable backend service or tuning a control loop on a
-                quadcopter's flight controller. Somewhere between the compiler and the workshop is where I do my
-                best work.
-            </p>
+            <p class="max-w-2xl text-base leading-relaxed text-ink-300 sm:text-lg">{{ about.blurb }}</p>
 
             <div class="mt-2 flex flex-wrap items-center justify-center gap-2.5">
-                <div v-for="skill in Object.keys(skills)" :key="skill"
+                <div v-for="skill in skills" :key="skill.name"
                     class="flex gap-2 items-center justify-between rounded-full border border-ink-700/70 bg-ink-900/50 px-4 py-1.5 text-xs uppercase tracking-[0.15em] text-ink-300">
-                    <img class="h-6 p-1 pl-0" :src="skills[skill]" alt="" loading="lazy" decoding="async" height="24">
-                    <span>
-                        {{ skill }}
-                    </span>
+                    <img class="h-6 p-1 pl-0" :src="skill.icon" :alt="skill.name" loading="lazy" decoding="async" height="24">
+                    <span>{{ skill.name }}</span>
                 </div>
             </div>
+
+            <RouterLink to="/about"
+                class="group mt-4 inline-flex items-center gap-2 text-sm uppercase tracking-[0.25em] text-teal-300 transition-colors duration-300 hover:text-teal-200">
+                More about me
+                <span class="transition-transform duration-300 group-hover:translate-x-1">&rarr;</span>
+            </RouterLink>
         </div>
     </section>
 </template>

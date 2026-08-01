@@ -25,8 +25,8 @@ const props = defineProps({
     modelUrl: { type: String, default: '/soar.glb' },
     targetSpan: { type: Number, default: 3 },
     maxSpeed: { type: Number, default: 10 },
-    turnRate: { type: Number, default: 2.6 },        // rad/s cap on how fast the nose turns
-    accel: { type: Number, default: 4 },
+    turnRate: { type: Number, default: 4 },        // rad/s cap on how fast the nose turns
+    accel: { type: Number, default: 5 },
     slowRadius: { type: Number, default: 3.4 },
     standoff: { type: Number, default: 1.2 },
     maxBank: { type: Number, default: 0.6 },         // coordinated bank into ordinary turns

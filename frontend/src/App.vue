@@ -1,21 +1,24 @@
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, defineAsyncComponent } from 'vue'
 import LoadingScreen from '@/components/LoadingScreen.vue'
 import { useAssetLoaderStore } from '@/stores/assetLoader'
+
+const FlyingPlane = defineAsyncComponent(() => import('@/components/FlyingPlane.vue'))
 
 const assetLoader = useAssetLoaderStore()
 
 onMounted(() => {
-  // kick off asset fetching only once the loading screen has painted
   assetLoader.load()
-  // warm the Three.js chunk in the background so the plane is ready the instant content reveals
-  import('@/components/FlyingPlane.vue')
+  import('@/components/FlyingPlane.vue') // warm the chunk during the loading screen
 })
 </script>
 
 <template>
   <LoadingScreen />
-  <RouterView v-if="assetLoader.loaded" />
+  <template v-if="assetLoader.loaded">
+    <FlyingPlane />
+    <RouterView />
+  </template>
 </template>
 
 <style scoped></style>
