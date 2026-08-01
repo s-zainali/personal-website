@@ -1,7 +1,14 @@
-<script setup></script>
+<script setup>
+import LoadingScreen from '@/components/LoadingScreen.vue'
+import { useAssetLoaderStore } from '@/stores/assetLoader'
+
+const assetLoader = useAssetLoaderStore()
+assetLoader.load()
+</script>
 
 <template>
-  <RouterView />
+  <LoadingScreen />
+  <RouterView v-if="assetLoader.loaded" />
 </template>
 
 <style scoped></style>

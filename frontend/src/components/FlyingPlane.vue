@@ -1,14 +1,14 @@
 <script setup>
 /*
- * FlyingPlane — a GLB aircraft that follows the pointer, drawn as a sleek dot + trailing-ring cursor.
+ * FlyingPlane — a GLB aircraft that follows the pointer, drawn as an adaptive reticle.
  *
- * Flight: capped-turn steering (curved, banked direction changes) + arrive speed (eases to a stop at
- * the crosshair, never orbits). Orientation uses a COHERENT frame — the up-vector is carried between
- * frames and only re-uprighted while roughly level — so passing the nose through vertical during a
- * left/right reversal rolls smoothly instead of snapping at the singularity.
+ * Flight: 3D banked-turn steering with a capped turn rate. Direction reversals arc through the depth
+ * axis (toward/away from the viewer) as a banked roll, NOT a flat in-plane half-loop — a half-loop
+ * puts you inverted at the top, which is what made it look upside-down. The plane's up is world-up
+ * PROJECTED onto the heading, which can never invert, so it always settles right-side up; bank is a
+ * temporary roll driven by how hard (and which way) it's turning.
  *
- * Cursor: a small precise dot at the pointer + a thin ring that trails with a slight lag. It adapts:
- * ring contracts over clickable things, becomes an I-beam over text. Native cursor hidden globally.
+ * Reticle: elegant double-ring that recolours on hover/click and never lags the pointer.
  */
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import * as THREE from 'three'
@@ -21,34 +21,31 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 const props = defineProps({
     modelUrl: { type: String, default: '/soar.glb' },
     targetSpan: { type: Number, default: 3 },
-    maxSpeed: { type: Number, default: 9.5 },       // top speed
-    turnRate: { type: Number, default: 3.4 },       // rad/s cap on how fast the nose swings
+    maxSpeed: { type: Number, default: 5.3 },       // top speed
+    turnRate: { type: Number, default: 3.0 },       // rad/s cap on turning
     accel: { type: Number, default: 4 },
-    slowRadius: { type: Number, default: 3.2 },
+    slowRadius: { type: Number, default: 3.4 },     // decelerate-to-arrive distance
     standoff: { type: Number, default: 1.2 },
-    maxBank: { type: Number, default: 0.7 },
+    maxBank: { type: Number, default: 0.85 },       // roll into turns (~49°); never inverts
     bankSign: { type: Number, default: 1 },
     saturation: { type: Number, default: 1.4 },
     exposure: { type: Number, default: 0.95 },
-    reticleColor: { type: String, default: '#6ee7d0' },
-    ringLag: { type: Number, default: 16 },         // higher = ring tracks the dot more tightly
+    reticleColor: { type: String, default: '#6ee7d0' }, // default
+    hoverColor: { type: String, default: '#c4b5fd' },   // over clickable
+    activeColor: { type: String, default: '#ffffff' },  // while pressed
     hideNativeCursor: { type: Boolean, default: true },
-    modelRotX: { type: Number, default: 180 },
+    modelRotX: { type: Number, default: 0 },
     modelRotY: { type: Number, default: 0 },
-    modelRotZ: { type: Number, default: 180 },
+    modelRotZ: { type: Number, default: 0 },
 })
 
 const container = ref(null)
-const cursor = ref(null)
-const ring = ref(null)
-const dot = ref(null)
+const reticle = ref(null)
 let renderer, scene, camera, composer, raf, clock, envRT, cursorStyle
 let aircraft
 let ready = false
+let seen = false
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
-
-// cursor state
-let px = -100, py = -100, rx = -100, ry = -100, firstMove = true
 
 const SaturationShader = {
     uniforms: { tDiffuse: { value: null }, saturation: { value: 1.0 } },
@@ -66,7 +63,6 @@ const SaturationShader = {
 const pos = new THREE.Vector3(0, 0, 0)
 const heading = new THREE.Vector3(1, 0, 0)
 const target = new THREE.Vector3(0, 0, 0)
-const upVec = new THREE.Vector3(0, 1, 0) // persistent up for the coherent frame
 let speed = 0
 let bank = 0
 let bankTarget = 0
@@ -77,7 +73,8 @@ const raycaster = new THREE.Raycaster()
 const flightPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
 const toTarget = new THREE.Vector3()
 const aim = new THREE.Vector3()
-const rawCross = new THREE.Vector3()
+const turnAxis = new THREE.Vector3()
+const upVec = new THREE.Vector3()
 const qStep = new THREE.Quaternion()
 const xAxis = new THREE.Vector3()
 const yAxis = new THREE.Vector3()
@@ -86,7 +83,7 @@ const basis = new THREE.Matrix4()
 const qLook = new THREE.Quaternion()
 const qRoll = new THREE.Quaternion()
 const AXIS_Z = new THREE.Vector3(0, 0, 1)
-const UP_REF = new THREE.Vector3(0, 1, 0)
+const WORLD_UP = new THREE.Vector3(0, 1, 0)
 const ALT_UP = new THREE.Vector3(0, 0, 1)
 
 const CLICKABLE = 'a,button,[role="button"],label,select,summary,input[type=checkbox],input[type=radio],input[type=submit],input[type=button],[data-cursor="pointer"]'
@@ -100,23 +97,20 @@ function stateFor(el) {
 }
 
 function onPointer(e) {
-    px = e.clientX
-    py = e.clientY
-    if (firstMove) {
-        rx = px
-        ry = py
-        firstMove = false
-        if (cursor.value) cursor.value.style.opacity = '1'
+    // position FIRST, synchronously, with no CSS transition on transform → never lags
+    if (reticle.value) {
+        reticle.value.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`
+        if (!seen) reticle.value.style.opacity = '1'
+        const st = stateFor(document.elementFromPoint(e.clientX, e.clientY))
+        if (reticle.value.dataset.state !== st) reticle.value.dataset.state = st
     }
-    if (dot.value) dot.value.style.transform = `translate(${px}px, ${py}px)`
-    if (cursor.value) {
-        const st = stateFor(document.elementFromPoint(px, py))
-        if (cursor.value.dataset.state !== st) cursor.value.dataset.state = st
-    }
-    ndc.set((px / window.innerWidth) * 2 - 1, -((py / window.innerHeight) * 2 - 1))
+    seen = true
+    ndc.set((e.clientX / window.innerWidth) * 2 - 1, -((e.clientY / window.innerHeight) * 2 - 1))
     raycaster.setFromCamera(ndc, camera)
     raycaster.ray.intersectPlane(flightPlane, target)
 }
+function onDown() { if (reticle.value) reticle.value.dataset.active = 'true' }
+function onUp() { if (reticle.value) reticle.value.dataset.active = 'false' }
 
 function resize() {
     const w = window.innerWidth
@@ -146,42 +140,47 @@ function follow(dt) {
     }
     speed += (desired - speed) * Math.min(1, dt * props.accel)
 
-    let stepFrac = 0
     if (dist > 0.05) {
-        const d = THREE.MathUtils.clamp(heading.dot(aim), -1, 1)
-        const ang = Math.acos(d)
-        if (ang > 1e-4) {
-            rawCross.crossVectors(heading, aim)
-            const turnDir = Math.sign(rawCross.z) || 1
+        // turn the nose toward the target in 3D, capped
+        turnAxis.crossVectors(heading, aim)
+        const sinA = turnAxis.length()
+        const cosA = THREE.MathUtils.clamp(heading.dot(aim), -1, 1)
+        const angle = Math.atan2(sinA, cosA)
+        if (angle > 1e-4) {
+            if (sinA < 1e-6) turnAxis.copy(WORLD_UP) // ~0/180°: yaw about vertical (arc through depth, stays upright)
+            turnAxis.normalize()
             const maxStep = props.turnRate * dt
-            const step = Math.min(ang, maxStep)
-            qStep.setFromAxisAngle(AXIS_Z, step * turnDir)
+            const step = Math.min(angle, maxStep)
+            qStep.setFromAxisAngle(turnAxis, step)
             heading.applyQuaternion(qStep).normalize()
-            stepFrac = (step / Math.max(maxStep, 1e-6)) * turnDir
-        }
-    }
-    bankTarget = -stepFrac * props.maxBank * props.bankSign
+            // bank into the turn: only the vertical-axis (yaw) part of the turn earns roll
+            const yawComp = turnAxis.dot(WORLD_UP)
+            bankTarget = -yawComp * (step / Math.max(maxStep, 1e-6)) * props.maxBank * props.bankSign
+        } else bankTarget = 0
+    } else bankTarget = 0
+
     pos.addScaledVector(heading, speed * dt)
 }
 
 function orient(dt) {
-    // coherent frame: build from the carried up-vector so it never flips at the vertical singularity
+    // up = world-up with the heading component removed → always "upper hemisphere", never inverts
+    const dotUp = heading.dot(WORLD_UP)
+    upVec.copy(WORLD_UP).addScaledVector(heading, -dotUp)
+    if (upVec.lengthSq() < 1e-6) {
+        const dotAlt = heading.dot(ALT_UP)
+        upVec.copy(ALT_UP).addScaledVector(heading, -dotAlt)
+    }
+    upVec.normalize()
+
     zAxis.copy(heading).multiplyScalar(-1)
-    xAxis.crossVectors(upVec, zAxis)
-    if (xAxis.lengthSq() < 1e-6) xAxis.crossVectors(ALT_UP, zAxis)
-    xAxis.normalize()
+    xAxis.crossVectors(upVec, zAxis).normalize()
     yAxis.crossVectors(zAxis, xAxis).normalize()
-    upVec.copy(yAxis)
-
-    // ease back toward true upright, but only while roughly level (near vertical we leave it alone,
-    // which is exactly what avoids the snap)
-    const horiz = 1 - Math.min(1, Math.abs(heading.y) * 1.25)
-    if (horiz > 0 && !reduceMotion) upVec.lerp(UP_REF, horiz * Math.min(1, dt * 1.5)).normalize()
-
     basis.makeBasis(xAxis, yAxis, zAxis)
     qLook.setFromRotationMatrix(basis)
-    bank += (bankTarget - bank) * Math.min(1, dt * 6)
+
+    bank += (bankTarget - bank) * Math.min(1, dt * 6) // roll eases in and levels back to 0
     qRoll.setFromAxisAngle(AXIS_Z, bank)
+
     aircraft.quaternion.multiplyQuaternions(qLook, qRoll)
     aircraft.position.copy(pos)
 }
@@ -193,11 +192,6 @@ function tick() {
         follow(dt)
         orient(dt)
     }
-    // trailing ring
-    const k = reduceMotion ? 1 : 1 - Math.exp(-props.ringLag * dt)
-    rx += (px - rx) * k
-    ry += (py - ry) * k
-    if (ring.value) ring.value.style.transform = `translate(${rx}px, ${ry}px)`
     composer.render()
 }
 
@@ -284,12 +278,18 @@ onMounted(() => {
         document.documentElement.classList.add('fp-nocursor')
     }
     window.addEventListener('pointermove', onPointer, { passive: true })
+    window.addEventListener('pointerdown', onDown, { passive: true })
+    window.addEventListener('pointerup', onUp, { passive: true })
+    window.addEventListener('pointercancel', onUp, { passive: true })
     window.addEventListener('resize', resize)
 })
 
 onBeforeUnmount(() => {
     cancelAnimationFrame(raf)
     window.removeEventListener('pointermove', onPointer)
+    window.removeEventListener('pointerdown', onDown)
+    window.removeEventListener('pointerup', onUp)
+    window.removeEventListener('pointercancel', onUp)
     window.removeEventListener('resize', resize)
     document.documentElement.classList.remove('fp-nocursor')
     cursorStyle?.remove()
@@ -313,9 +313,20 @@ onBeforeUnmount(() => {
 <template>
     <div class="flying-plane">
         <div ref="container" class="fp-canvas" aria-hidden="true"></div>
-        <div ref="cursor" class="fp-cursor" data-state="default" aria-hidden="true" :style="{ color: reticleColor }">
-            <div ref="ring" class="fp-ring-pos"><span class="fp-ring"></span></div>
-            <div ref="dot" class="fp-dot-pos"><span class="fp-dot"></span></div>
+        <div
+            ref="reticle"
+            class="fp-reticle"
+            data-state="default"
+            data-active="false"
+            aria-hidden="true"
+            :style="{ '--base': reticleColor, '--hover': hoverColor, '--active': activeColor }"
+        >
+            <svg viewBox="0 0 40 40" width="40" height="40">
+                <circle class="fp-halo" cx="20" cy="20" r="15" fill="none" stroke="currentColor" stroke-width="0.8" />
+                <circle class="fp-ring" cx="20" cy="20" r="11" fill="none" stroke="currentColor" stroke-width="1.1" />
+                <circle class="fp-dot" cx="20" cy="20" r="1.7" fill="currentColor" />
+                <rect class="fp-beam" x="19.1" y="9" width="1.8" height="22" rx="0.9" fill="currentColor" />
+            </svg>
         </div>
     </div>
 </template>
@@ -335,68 +346,84 @@ onBeforeUnmount(() => {
     display: block;
 }
 
-.fp-cursor {
+.fp-reticle {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 40px;
+    height: 40px;
     opacity: 0;
-    transition: opacity 300ms ease;
+    color: var(--base);
+    /* NOTE: transform is intentionally NOT transitioned, so the reticle tracks the pointer instantly */
+    transition: opacity 300ms ease, color 150ms ease;
+    filter: drop-shadow(0 0 4px currentColor);
 }
-.fp-ring-pos,
-.fp-dot-pos {
-    position: absolute;
-    top: 0;
-    left: 0;
-    will-change: transform;
-}
-/* inner elements are centred on the pos point and carry the state morphs */
+.fp-halo,
 .fp-ring,
-.fp-dot {
-    position: absolute;
-    left: 0;
-    top: 0;
-    display: block;
-    transform: translate(-50%, -50%);
-    transition: width 220ms ease, height 220ms ease, opacity 220ms ease, border-radius 220ms ease, transform 220ms ease;
+.fp-dot,
+.fp-beam {
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: opacity 180ms ease, transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.fp-halo {
+    opacity: 0.18;
 }
 .fp-ring {
-    width: 34px;
-    height: 34px;
-    border: 1px solid currentColor;
-    border-radius: 50%;
-    opacity: 0.5;
+    opacity: 0.6;
 }
 .fp-dot {
-    width: 5px;
-    height: 5px;
-    background: currentColor;
-    border-radius: 50%;
-    box-shadow: 0 0 5px currentColor;
+    opacity: 1;
 }
-
-/* clickable: ring draws in to hug the dot, dot swells slightly */
-.fp-cursor[data-state='pointer'] .fp-ring {
-    transform: translate(-50%, -50%) scale(0.58);
-    opacity: 0.9;
-}
-.fp-cursor[data-state='pointer'] .fp-dot {
-    transform: translate(-50%, -50%) scale(1.5);
-}
-
-/* text: ring fades, dot becomes a fine I-beam */
-.fp-cursor[data-state='text'] .fp-ring {
+.fp-beam {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.4);
 }
-.fp-cursor[data-state='text'] .fp-dot {
-    width: 2px;
-    height: 22px;
-    border-radius: 1px;
+
+/* recolour by state; active wins (declared last, equal specificity) */
+.fp-reticle[data-state='pointer'] {
+    color: var(--hover);
+}
+.fp-reticle[data-active='true'] {
+    color: var(--active);
+}
+
+/* clickable: outer halo blooms, inner ring sharpens, dot swells */
+.fp-reticle[data-state='pointer'] .fp-halo {
+    opacity: 0.5;
+    transform: scale(1.18);
+}
+.fp-reticle[data-state='pointer'] .fp-ring {
+    opacity: 0.95;
+}
+.fp-reticle[data-state='pointer'] .fp-dot {
+    transform: scale(1.2);
+}
+
+/* pressed: quick inward tuck for tactile feedback */
+.fp-reticle[data-active='true'] .fp-ring {
+    transform: scale(0.82);
+}
+.fp-reticle[data-active='true'] .fp-halo {
+    transform: scale(1);
+    opacity: 0.35;
+}
+
+/* text: rings drop away to a slim I-beam */
+.fp-reticle[data-state='text'] .fp-halo,
+.fp-reticle[data-state='text'] .fp-ring,
+.fp-reticle[data-state='text'] .fp-dot {
+    opacity: 0;
+}
+.fp-reticle[data-state='text'] .fp-beam {
+    opacity: 0.9;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .fp-cursor,
+    .fp-reticle,
+    .fp-halo,
     .fp-ring,
-    .fp-dot {
+    .fp-dot,
+    .fp-beam {
         transition: none;
     }
 }
