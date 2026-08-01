@@ -1,25 +1,25 @@
 <script setup>
 const projects = [
     {
-        name: 'Aerowatch',
+        name: 'OpenBlue',
         description: 'Autonomous drone telemetry and mission-planning dashboard with live MAVLink streaming.',
         tags: ['Vue', 'WebSockets', 'MAVLink', 'PostgreSQL'],
         href: 'https://github.com/s-zainali',
     },
     {
-        name: 'Pulse',
+        name: 'SOAR',
         description: 'Distributed task scheduler with worker queues built for horizontal scale.',
         tags: ['Go', 'Redis', 'Kubernetes'],
         href: 'https://github.com/s-zainali',
     },
     {
-        name: 'Wingman',
+        name: 'Pool Manager',
         description: 'PX4-based flight controller fork with custom failsafe and geofencing logic.',
         tags: ['C++', 'PX4', 'ROS 2'],
         href: 'https://github.com/s-zainali',
     },
     {
-        name: 'Ledger Lite',
+        name: 'Traders Hall',
         description: 'Lightweight double-entry accounting API built for small businesses.',
         tags: ['TypeScript', 'Node.js', 'PostgreSQL'],
         href: 'https://github.com/s-zainali',
