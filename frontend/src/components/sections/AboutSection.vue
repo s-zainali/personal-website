@@ -12,6 +12,9 @@ const skills = {
     'Docker': '/docker.png',
     'PostgreSQL': '/postgres.png',
     'AWS': '/aws.webp',
+    'Onshape': '/onshape.png',
+    'SolidWorks': '/solidworks.png',
+    'Git': '/git.png',
 }
 </script>
 
