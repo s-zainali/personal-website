@@ -1,12 +1,14 @@
 <script setup>
+import { defineAsyncComponent } from 'vue'
 import Header from '@/components/Header.vue'
 import PortraitHalo from '@/components/PortraitHalo.vue'
 import AboutSection from '@/components/sections/AboutSection.vue'
 import ExperienceSection from '@/components/sections/ExperienceSection.vue'
 import ProjectsSection from '@/components/sections/ProjectsSection.vue'
 import ContactSection from '@/components/sections/ContactSection.vue'
-import PoweredByZain from '@/Components/PoweredByZain.vue'
-import FlyingPlane from '@/components/FlyingPlane.vue'
+import PoweredByZain from '@/components/PoweredByZain.vue'
+// Heavy Three.js overlay — split into its own chunk so the hero paints without waiting on it.
+const FlyingPlane = defineAsyncComponent(() => import('@/components/FlyingPlane.vue'))
 </script>
 
 <template>

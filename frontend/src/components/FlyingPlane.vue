@@ -2,17 +2,20 @@
 /*
  * FlyingPlane — a GLB aircraft that follows the pointer, drawn as an adaptive reticle.
  *
- * Flight: 3D banked-turn steering with a capped turn rate. Direction reversals arc through the depth
- * axis (toward/away from the viewer) as a banked roll, NOT a flat in-plane half-loop — a half-loop
- * puts you inverted at the top, which is what made it look upside-down. The plane's up is world-up
- * PROJECTED onto the heading, which can never invert, so it always settles right-side up; bank is a
- * temporary roll driven by how hard (and which way) it's turning.
+ * Flight & roll: the orientation is PARALLEL-TRANSPORTED — as the nose turns to follow the pointer,
+ * the plane's "up" is carried along rather than reset every frame. So a hard direction reversal
+ * naturally rolls the plane over (it ends up inverted), exactly like a real turn. A separate,
+ * rate-limited LEVELING roll continuously rolls it back upright — but it's deliberately weak while
+ * the plane is turning hard, so mid-reversal it can't keep up (the plane goes upside down) and only
+ * once the turn eases does it win and roll level again. No scripted flip, no forced pitch-up.
  *
  * Reticle: elegant double-ring that recolours on hover/click and never lags the pointer.
+ * Perf: model is meshopt-compressed (decoder wired); the render loop pauses while the tab is hidden.
  */
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
@@ -21,22 +24,23 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 const props = defineProps({
     modelUrl: { type: String, default: '/soar.glb' },
     targetSpan: { type: Number, default: 3 },
-    maxSpeed: { type: Number, default: 5.3 },       // top speed
-    turnRate: { type: Number, default: 3.0 },       // rad/s cap on turning
+    maxSpeed: { type: Number, default: 10 },
+    turnRate: { type: Number, default: 2.6 },        // rad/s cap on how fast the nose turns
     accel: { type: Number, default: 4 },
-    slowRadius: { type: Number, default: 3.4 },     // decelerate-to-arrive distance
+    slowRadius: { type: Number, default: 3.4 },
     standoff: { type: Number, default: 1.2 },
-    maxBank: { type: Number, default: 0.85 },       // roll into turns (~49°); never inverts
+    maxBank: { type: Number, default: 0.6 },         // coordinated bank into ordinary turns
     bankSign: { type: Number, default: 1 },
+    levelRate: { type: Number, default: 9 },       // rad/s the wings roll back toward level
     saturation: { type: Number, default: 1.4 },
     exposure: { type: Number, default: 0.95 },
-    reticleColor: { type: String, default: '#6ee7d0' }, // default
-    hoverColor: { type: String, default: '#c4b5fd' },   // over clickable
-    activeColor: { type: String, default: '#ffffff' },  // while pressed
+    reticleColor: { type: String, default: '#6ee7d0' },
+    hoverColor: { type: String, default: '#c4b5fd' },
+    activeColor: { type: String, default: '#ffffff' },
     hideNativeCursor: { type: Boolean, default: true },
-    modelRotX: { type: Number, default: 0 },
+    modelRotX: { type: Number, default: 180 },
     modelRotY: { type: Number, default: 0 },
-    modelRotZ: { type: Number, default: 0 },
+    modelRotZ: { type: Number, default: 180 },
 })
 
 const container = ref(null)
@@ -64,8 +68,13 @@ const pos = new THREE.Vector3(0, 0, 0)
 const heading = new THREE.Vector3(1, 0, 0)
 const target = new THREE.Vector3(0, 0, 0)
 let speed = 0
-let bank = 0
+let bank = 0            // smoothed coordinated bank
 let bankTarget = 0
+let turnActivity = 0    // 0..1, how hard we're currently turning (weakens leveling)
+
+// orientation state (persistent, so "up" is carried across frames = parallel transport)
+const qShip = new THREE.Quaternion()
+let shipInited = false
 
 // scratch
 const ndc = new THREE.Vector2()
@@ -74,15 +83,20 @@ const flightPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0)
 const toTarget = new THREE.Vector3()
 const aim = new THREE.Vector3()
 const turnAxis = new THREE.Vector3()
-const upVec = new THREE.Vector3()
 const qStep = new THREE.Quaternion()
 const xAxis = new THREE.Vector3()
 const yAxis = new THREE.Vector3()
 const zAxis = new THREE.Vector3()
 const basis = new THREE.Matrix4()
-const qLook = new THREE.Quaternion()
-const qRoll = new THREE.Quaternion()
-const AXIS_Z = new THREE.Vector3(0, 0, 1)
+const LOCAL_NOSE = new THREE.Vector3(0, 0, -1)
+const LOCAL_UP = new THREE.Vector3(0, 1, 0)
+const curNose = new THREE.Vector3()
+const curUp = new THREE.Vector3()
+const refUp = new THREE.Vector3()
+const cross = new THREE.Vector3()
+const qAlign = new THREE.Quaternion()
+const qRollLevel = new THREE.Quaternion()
+const qTilt = new THREE.Quaternion()
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
 const ALT_UP = new THREE.Vector3(0, 0, 1)
 
@@ -97,7 +111,6 @@ function stateFor(el) {
 }
 
 function onPointer(e) {
-    // position FIRST, synchronously, with no CSS transition on transform → never lags
     if (reticle.value) {
         reticle.value.style.transform = `translate(${e.clientX}px, ${e.clientY}px) translate(-50%, -50%)`
         if (!seen) reticle.value.style.opacity = '1'
@@ -130,6 +143,7 @@ function follow(dt) {
         if (dist > props.standoff) pos.copy(target).addScaledVector(aim, -props.standoff)
         if (dist > 0.02) heading.copy(aim)
         bankTarget = 0
+        turnActivity = 0
         return
     }
 
@@ -140,48 +154,70 @@ function follow(dt) {
     }
     speed += (desired - speed) * Math.min(1, dt * props.accel)
 
+    let turnFrac = 0
     if (dist > 0.05) {
-        // turn the nose toward the target in 3D, capped
         turnAxis.crossVectors(heading, aim)
         const sinA = turnAxis.length()
         const cosA = THREE.MathUtils.clamp(heading.dot(aim), -1, 1)
         const angle = Math.atan2(sinA, cosA)
         if (angle > 1e-4) {
-            if (sinA < 1e-6) turnAxis.copy(WORLD_UP) // ~0/180°: yaw about vertical (arc through depth, stays upright)
+            if (sinA < 1e-6) turnAxis.copy(WORLD_UP)
             turnAxis.normalize()
             const maxStep = props.turnRate * dt
             const step = Math.min(angle, maxStep)
             qStep.setFromAxisAngle(turnAxis, step)
             heading.applyQuaternion(qStep).normalize()
-            // bank into the turn: only the vertical-axis (yaw) part of the turn earns roll
+            turnFrac = step / Math.max(maxStep, 1e-6)
             const yawComp = turnAxis.dot(WORLD_UP)
-            bankTarget = -yawComp * (step / Math.max(maxStep, 1e-6)) * props.maxBank * props.bankSign
+            bankTarget = -yawComp * turnFrac * props.maxBank * props.bankSign
         } else bankTarget = 0
     } else bankTarget = 0
+
+    // smoothed turn intensity — high while turning hard, which is when leveling should back off
+    turnActivity += (turnFrac - turnActivity) * Math.min(1, dt * 7)
+    bank += (bankTarget - bank) * Math.min(1, dt * 6)
 
     pos.addScaledVector(heading, speed * dt)
 }
 
 function orient(dt) {
-    // up = world-up with the heading component removed → always "upper hemisphere", never inverts
-    const dotUp = heading.dot(WORLD_UP)
-    upVec.copy(WORLD_UP).addScaledVector(heading, -dotUp)
-    if (upVec.lengthSq() < 1e-6) {
-        const dotAlt = heading.dot(ALT_UP)
-        upVec.copy(ALT_UP).addScaledVector(heading, -dotAlt)
+    if (!shipInited) {
+        zAxis.copy(heading).multiplyScalar(-1)
+        xAxis.crossVectors(WORLD_UP, zAxis).normalize()
+        yAxis.crossVectors(zAxis, xAxis).normalize()
+        basis.makeBasis(xAxis, yAxis, zAxis)
+        qShip.setFromRotationMatrix(basis)
+        shipInited = true
     }
-    upVec.normalize()
 
-    zAxis.copy(heading).multiplyScalar(-1)
-    xAxis.crossVectors(upVec, zAxis).normalize()
-    yAxis.crossVectors(zAxis, xAxis).normalize()
-    basis.makeBasis(xAxis, yAxis, zAxis)
-    qLook.setFromRotationMatrix(basis)
+    // 1) TURN: rotate the whole ship so its nose tracks the heading — carries "up" along with it
+    curNose.copy(LOCAL_NOSE).applyQuaternion(qShip)
+    qAlign.setFromUnitVectors(curNose, heading)
+    qShip.premultiply(qAlign)
 
-    bank += (bankTarget - bank) * Math.min(1, dt * 6) // roll eases in and levels back to 0
-    qRoll.setFromAxisAngle(AXIS_Z, bank)
+    // 2) LEVEL: roll about the nose toward upright (world-up ⟂ heading, tilted by the coordinated bank)
+    const dotUp = heading.dot(WORLD_UP)
+    refUp.copy(WORLD_UP).addScaledVector(heading, -dotUp)
+    if (refUp.lengthSq() < 1e-5) {
+        const dotAlt = heading.dot(ALT_UP)
+        refUp.copy(ALT_UP).addScaledVector(heading, -dotAlt)
+    }
+    refUp.normalize()
+    if (bank !== 0) {
+        qTilt.setFromAxisAngle(heading, bank)
+        refUp.applyQuaternion(qTilt)
+    }
 
-    aircraft.quaternion.multiplyQuaternions(qLook, qRoll)
+    curUp.copy(LOCAL_UP).applyQuaternion(qShip)
+    const signed = Math.atan2(cross.crossVectors(curUp, refUp).dot(heading), curUp.dot(refUp))
+    // leveling backs off while turning hard → the plane genuinely rolls inverted mid-reversal,
+    // then rolls upright once the turn eases
+    const rate = reduceMotion ? Math.PI : props.levelRate * (0.12 + 0.88 * (1 - turnActivity))
+    const step = THREE.MathUtils.clamp(signed, -rate * dt, rate * dt)
+    qRollLevel.setFromAxisAngle(heading, step)
+    qShip.premultiply(qRollLevel)
+
+    aircraft.quaternion.copy(qShip)
     aircraft.position.copy(pos)
 }
 
@@ -193,6 +229,15 @@ function tick() {
         orient(dt)
     }
     composer.render()
+}
+
+function onVisibility() {
+    if (document.hidden) {
+        if (raf) { cancelAnimationFrame(raf); raf = 0 }
+    } else if (!raf) {
+        clock.getDelta()
+        raf = requestAnimationFrame(tick)
+    }
 }
 
 onMounted(() => {
@@ -237,7 +282,9 @@ onMounted(() => {
     clock = new THREE.Clock()
     tick()
 
-    new GLTFLoader().load(
+    const loader = new GLTFLoader()
+    loader.setMeshoptDecoder(MeshoptDecoder)
+    loader.load(
         props.modelUrl,
         (gltf) => {
             const model = gltf.scene
@@ -282,15 +329,17 @@ onMounted(() => {
     window.addEventListener('pointerup', onUp, { passive: true })
     window.addEventListener('pointercancel', onUp, { passive: true })
     window.addEventListener('resize', resize)
+    document.addEventListener('visibilitychange', onVisibility)
 })
 
 onBeforeUnmount(() => {
-    cancelAnimationFrame(raf)
+    if (raf) cancelAnimationFrame(raf)
     window.removeEventListener('pointermove', onPointer)
     window.removeEventListener('pointerdown', onDown)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
     window.removeEventListener('resize', resize)
+    document.removeEventListener('visibilitychange', onVisibility)
     document.documentElement.classList.remove('fp-nocursor')
     cursorStyle?.remove()
     envRT?.dispose()
@@ -354,7 +403,6 @@ onBeforeUnmount(() => {
     height: 40px;
     opacity: 0;
     color: var(--base);
-    /* NOTE: transform is intentionally NOT transitioned, so the reticle tracks the pointer instantly */
     transition: opacity 300ms ease, color 150ms ease;
     filter: drop-shadow(0 0 4px currentColor);
 }
@@ -379,7 +427,6 @@ onBeforeUnmount(() => {
     opacity: 0;
 }
 
-/* recolour by state; active wins (declared last, equal specificity) */
 .fp-reticle[data-state='pointer'] {
     color: var(--hover);
 }
@@ -387,7 +434,6 @@ onBeforeUnmount(() => {
     color: var(--active);
 }
 
-/* clickable: outer halo blooms, inner ring sharpens, dot swells */
 .fp-reticle[data-state='pointer'] .fp-halo {
     opacity: 0.5;
     transform: scale(1.18);
@@ -399,7 +445,6 @@ onBeforeUnmount(() => {
     transform: scale(1.2);
 }
 
-/* pressed: quick inward tuck for tactile feedback */
 .fp-reticle[data-active='true'] .fp-ring {
     transform: scale(0.82);
 }
@@ -408,7 +453,6 @@ onBeforeUnmount(() => {
     opacity: 0.35;
 }
 
-/* text: rings drop away to a slim I-beam */
 .fp-reticle[data-state='text'] .fp-halo,
 .fp-reticle[data-state='text'] .fp-ring,
 .fp-reticle[data-state='text'] .fp-dot {

@@ -36,7 +36,7 @@ const skills = {
             <div class="mt-2 flex flex-wrap items-center justify-center gap-2.5">
                 <div v-for="skill in Object.keys(skills)" :key="skill"
                     class="flex gap-2 items-center justify-between rounded-full border border-ink-700/70 bg-ink-900/50 px-4 py-1.5 text-xs uppercase tracking-[0.15em] text-ink-300">
-                    <img class="h-6 p-1 pl-0" :src="skills[skill]" alt="">
+                    <img class="h-6 p-1 pl-0" :src="skills[skill]" alt="" loading="lazy" decoding="async" height="24">
                     <span>
                         {{ skill }}
                     </span>
